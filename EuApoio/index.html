@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Criador de Moldura</title>
+<style>
+:root{
+  --bg:#F5F6FA; --card:#fff; --panel:#EEF1F6; --ink:#111827; --muted:#6B7280;
+  --line:#D5DAE3; --primary:#1B5FE4; --primary-off:#9DB8F3;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45}
+.wrap{max-width:1128px;margin:0 auto;padding:36px 24px 28px}
+h1{font-size:clamp(1.9rem,4vw,2.3rem);line-height:1.1;margin:0 0 6px;letter-spacing:-.02em}
+.sub{margin:0 0 26px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:minmax(0,1.14fr) minmax(0,1fr);gap:28px;align-items:stretch}
+.card{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:26px;padding:18px;box-shadow:0 8px 30px rgba(17,24,39,.06)}
+.preview{background:var(--panel);border-radius:18px;padding:14px}
+canvas{display:block;width:100%;height:auto;touch-action:none;cursor:grab;
+  background:repeating-conic-gradient(#e4e4e4 0 25%,#fff 0 50%) 0 0/24px 24px}
+canvas.drag{cursor:grabbing}
+h2{font-size:.95rem;margin:0 0 8px}
+.file{width:100%;padding:10px 12px;font:inherit;font-size:.85rem;background:var(--panel);border:1px dashed var(--line);border-radius:12px}
+.note{font-size:.8rem;color:var(--muted);margin:8px 0 14px;line-height:1.4}
+.head{display:flex;justify-content:space-between;align-items:baseline}
+.head h2{margin:0}.head span{color:var(--muted);font-size:.85rem}
+input[type=range]{width:100%;margin:8px 0 14px;accent-color:var(--primary)}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{font:inherit;font-weight:700;border-radius:12px;cursor:pointer}
+.sec{padding:12px;font-size:.85rem;background:var(--panel);border:1px solid var(--line);color:var(--ink)}
+.sec:disabled{opacity:.55;cursor:not-allowed}
+.tip{background:var(--panel);border-radius:12px;padding:12px 14px;font-size:.82rem;line-height:1.45;margin:14px 0}
+.tip code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+.main{width:100%;padding:13px;border:0;background:var(--primary);color:#fff;font-size:.88rem}
+.main:disabled{background:var(--primary-off);cursor:not-allowed}
+#status{font-size:.8rem;color:var(--muted);margin:auto 0 0;padding-top:10px}
+#status.err{color:#B42318}
+footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:32px}
+button:focus-visible,input:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+@media(max-width:860px){.grid{grid-template-columns:1fr}.wrap{padding:28px 16px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="titulo">Sua campanha</h1>
+  <p class="sub" id="descricao">Adicione sua foto e aplique a moldura da campanha.</p>
+
+  <div class="grid">
+    <div class="card"><div class="preview">
+      <canvas id="c" width="1080" height="1080" aria-label="Prévia da foto com moldura"></canvas>
+    </div></div>
+
+    <div class="card">
+      <h2>1. Escolha sua foto</h2>
+      <input class="file" type="file" id="foto" accept="image/*">
+      <p class="note">A imagem fica no seu dispositivo. Nada é enviado para um servidor.</p>
+
+      <div class="head"><h2>Zoom</h2><span id="zv">100%</span></div>
+      <input type="range" id="zoom" min="50" max="250" step="1" value="100" disabled>
+
+      <h2>Posição</h2>
+      <div class="btns">
+        <button class="sec" id="centralizar" disabled>Centralizar</button>
+        <button class="sec" id="redefinir" disabled>Redefinir</button>
+      </div>
+      <p class="note" style="margin-bottom:0">Arraste a foto diretamente sobre a prévia.</p>
+
+      <div class="tip"><strong>Como publicar:</strong> coloque este <code>index.html</code> e o arquivo <code>moldura.png</code> (e <code>moldura.js</code>, para uso local) na mesma pasta do seu repositório GitHub. A edição da foto acontece inteiramente no navegador.</div>
+
+      <div class="tip" id="fallback" hidden><strong>Aberto direto da pasta:</strong> o navegador bloqueia a leitura automática da moldura. Selecione o arquivo <code>moldura.png</code> uma vez para liberar o download.<br><input class="file" type="file" id="molduraFile" accept="image/png,image/webp" style="margin-top:10px"></div>
+
+      <button class="main" id="baixar" disabled>Baixar minha foto</button>
+      <p id="status" role="status"></p>
+    </div>
+  </div>
+</div>
+
+<script src="moldura.js"></script>
+<script>
+/* ===== CONFIGURAÇÃO ===== */
+const CONFIG = {
+  titulo: "Sua campanha",
+  descricao: "Adicione sua foto e aplique a moldura da campanha.",
+  moldura: "moldura.png",               // PNG com a área da foto transparente
+  arquivoSaida: "minha-foto-moldura.png",
+  larguraMax: 2048,                      // limite do tamanho da imagem final
+  corPlaceholder: "#00A0DC"
+};
+/* ========================= */
+
+const $ = id => document.getElementById(id);
+const cv = $('c'), ctx = cv.getContext('2d');
+const st = { img:null, frame:null, frameOk:false, tainted:false, x:0, y:0, zoom:1, base:1 };
+$('titulo').textContent = CONFIG.titulo;
+$('descricao').textContent = CONFIG.descricao;
+document.title = CONFIG.titulo;
+
+function msg(t, err){ const s=$('status'); s.textContent=t||''; s.className=err?'err':''; }
+const load = src => new Promise((ok,no)=>{ const i=new Image(); i.onload=()=>ok(i); i.onerror=no; i.src=src; });
+
+function tamanho(w,h){
+  const k = Math.min(1, CONFIG.larguraMax/Math.max(w,h));
+  cv.width = Math.round(w*k); cv.height = Math.round(h*k);
+}
+
+/* Moldura provisória: quadrado azul com círculo vazado */
+function placeholder(){
+  tamanho(1080,1080);
+  const c=document.createElement('canvas'); c.width=c.height=1080;
+  const g=c.getContext('2d');
+  g.fillStyle=CONFIG.corPlaceholder;
+  g.beginPath(); g.rect(0,0,1080,1080); g.arc(540,540,525,0,Math.PI*2,true); g.fill('evenodd');
+  return c;
+}
+
+function ajustarBase(){
+  if(st.img) st.base = Math.max(cv.width/st.img.width, cv.height/st.img.height);
+}
+
+function draw(){
+  const W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  if(st.img){
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
+    ctx.save();
+    ctx.translate(W/2+st.x, H/2+st.y);
+    const k=st.base*st.zoom; ctx.scale(k,k);
+    ctx.drawImage(st.img,-st.img.width/2,-st.img.height/2);
+    ctx.restore();
+  }
+  if(st.frame) ctx.drawImage(st.frame,0,0,W,H);
+  $('zv').textContent = Math.round(st.zoom*100)+'%';
+}
+
+function atualizarBotoes(){
+  const tem = !!st.img;
+  ['zoom','centralizar','redefinir'].forEach(id=>$(id).disabled=!tem);
+  $('baixar').disabled = !(tem && st.frameOk && !st.tainted);
+}
+
+function reset(tudo){
+  st.x=st.y=0;
+  if(tudo){ st.zoom=1; $('zoom').value=100; }
+  draw();
+}
+
+$('foto').addEventListener('change', e=>{
+  const f=e.target.files[0]; if(!f) return;
+  if(!f.type.startsWith('image/')){ msg('Esse arquivo não é uma imagem.',true); return; }
+  load(URL.createObjectURL(f)).then(i=>{
+    st.img=i; ajustarBase(); st.x=st.y=0; st.zoom=1; $('zoom').value=100;
+    atualizarBotoes(); draw();
+    msg(st.frameOk ? 'Pronto. Ajuste a posição e baixe sua foto.' : 'Moldura ainda não encontrada. Coloque '+CONFIG.moldura+' junto deste HTML.', !st.frameOk);
+  }).catch(()=>msg('Não foi possível abrir essa imagem.',true));
+});
+$('zoom').addEventListener('input', e=>{ st.zoom=e.target.value/100; draw(); });
+$('centralizar').addEventListener('click', ()=>reset(false));
+$('redefinir').addEventListener('click', ()=>reset(true));
+
+/* Arrastar, pinça e roda do mouse */
+const ptrs=new Map(); let p0=null;
+cv.addEventListener('pointerdown', e=>{
+  if(!st.img) return;
+  cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY}); cv.classList.add('drag');
+  if(ptrs.size===2){ const [a,b]=[...ptrs.values()]; p0={d:Math.hypot(a.x-b.x,a.y-b.y),z:st.zoom}; }
+});
+cv.addEventListener('pointermove', e=>{
+  const prev=ptrs.get(e.pointerId); if(!prev) return;
+  const f=cv.width/cv.getBoundingClientRect().width;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===1){ st.x+=(e.clientX-prev.x)*f; st.y+=(e.clientY-prev.y)*f; }
+  else if(p0){ const [a,b]=[...ptrs.values()];
+    st.zoom=Math.min(2.5,Math.max(.5,p0.z*Math.hypot(a.x-b.x,a.y-b.y)/p0.d)); $('zoom').value=Math.round(st.zoom*100); }
+  draw();
+});
+const up=e=>{ ptrs.delete(e.pointerId); p0=null; if(!ptrs.size) cv.classList.remove('drag'); };
+cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
+cv.addEventListener('wheel', e=>{
+  if(!st.img) return; e.preventDefault();
+  st.zoom=Math.min(2.5,Math.max(.5,st.zoom*(e.deltaY<0?1.05:.95)));
+  $('zoom').value=Math.round(st.zoom*100); draw();
+},{passive:false});
+
+/* Download */
+$('baixar').addEventListener('click', ()=>{
+  try{
+    cv.toBlob(b=>{
+      if(!b){ msg('Não foi possível gerar a imagem.',true); return; }
+      const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=CONFIG.arquivoSaida; a.click();
+      msg('Imagem baixada.');
+    },'image/png');
+  }catch(_){
+    msg('O navegador bloqueou o download. Abra a página por um servidor (http/https), não direto do arquivo.',true);
+  }
+});
+
+/* Início: 1) moldura.js (base64), 2) moldura.png, 3) seleção manual se estiver em file:// */
+function bloqueada(img){
+  try{ const t=document.createElement('canvas'); t.width=t.height=1;
+    const g=t.getContext('2d'); g.drawImage(img,0,0); g.getImageData(0,0,1,1); return false; }
+  catch(_){ return true; }
+}
+function aplicarMoldura(i, tainted){
+  st.frame=i; st.frameOk=true; st.tainted=tainted;
+  tamanho(i.naturalWidth,i.naturalHeight);
+  cv.style.aspectRatio = cv.width+' / '+cv.height;
+  $('fallback').hidden = !tainted;
+  msg(tainted ? 'Selecione moldura.png abaixo para poder baixar a foto.' : '');
+  ajustarBase(); atualizarBotoes(); draw();
+}
+$('molduraFile').addEventListener('change', e=>{
+  const f=e.target.files[0]; if(!f) return;
+  load(URL.createObjectURL(f)).then(i=>{ aplicarMoldura(i,false); msg('Moldura carregada. Agora é só baixar.'); })
+    .catch(()=>msg('Não foi possível abrir essa moldura.',true));
+});
+
+(window.MOLDURA_DATA ? load(window.MOLDURA_DATA) : load(CONFIG.moldura)).then(i=>{
+  aplicarMoldura(i, window.MOLDURA_DATA ? false : bloqueada(i));
+}).catch(()=>{
+  st.frame=placeholder(); st.frameOk=false;
+  msg('Moldura ainda não encontrada. Coloque '+CONFIG.moldura+' junto deste HTML.');
+  atualizarBotoes(); draw();
+});
+draw();
+</script>
+</body>
+</html>
